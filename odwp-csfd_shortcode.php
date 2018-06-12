@@ -2,7 +2,7 @@
 /**
  * Plugin Name: ČSFD.cz shortcode
  * Description: Plugin, který umožňuje snadno vložit shortcode s URL na ČSFD.cz, který pak bude zobrazen jako snippet s informacemi o filmu na vašich stránkách.
- * Version: 0.1.0
+ * Version: 0.2.0
  * Author: Ondřej Doněk
  * Author URI: https://ondrejd.com/
  * License: GPLv3
@@ -36,20 +36,19 @@
  * @link https://bitbucket.com/ondrejd/odwp-csfd_shortcode for the canonical source repository
  * @package odwp-csfd_shortcode
  * @since 0.1.0
- * 
- * @todo Přidat cache - prostě jen MD5 url (tak získáme název souboru), 
- *       do něj to uložíme a pak při dalším použití jen zjistíme, zda 
- *       existuje a není příliš starý (dle nastavení) a případně ho rovnou 
- *       použijeme, v opačném případě ho vygenerujeme znovu.
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
+defined( 'ODWPCS_CACHE_DIR' ) || define( 'ODWPCS_CACHE_DIR', WP_CONTENT_DIR . '/uploads/odwpcs-cache' );
+defined( 'ODWPCS_CACHE_TIME' ) || define( 'ODWPCS_CACHE_TIME', 60 * 60 * 24 * 5 );
+
 /**
  * @param \DOMElement $movie_elm
  * @return array
+ * @since 0.1.0
  */
 function odwpcs_get_csfd_movie_title( \DOMElement $movie_elm ) {
     $title = '';
@@ -65,6 +64,7 @@ function odwpcs_get_csfd_movie_title( \DOMElement $movie_elm ) {
 /**
  * @param \DOMElement $movie_elm
  * @return array
+ * @since 0.1.0
  */
 function odwpcs_get_csfd_movie_category( \DOMElement $movie_elm ) {
     $cat = '';
@@ -83,6 +83,7 @@ function odwpcs_get_csfd_movie_category( \DOMElement $movie_elm ) {
 /**
  * @param \DOMDocument $dom
  * @return array
+ * @since 0.1.0
  */
 function odwpcs_get_csfd_movie_plot( \DOMDocument $dom ) {
     $desc = '';
@@ -112,6 +113,7 @@ function odwpcs_get_csfd_movie_plot( \DOMDocument $dom ) {
 /**
  * @param \DOMDocument $dom
  * @return array
+ * @since 0.1.0
  */
 function odwpcs_get_csfd_movie_image( \DOMDocument $dom ) {
     $img = '';
@@ -134,6 +136,7 @@ function odwpcs_get_csfd_movie_image( \DOMDocument $dom ) {
 /**
  * @param \DOMDocument $dom
  * @return array
+ * @since 0.1.0
  */
 function odwpcs_get_csfd_movie_video( \DOMDocument $dom ) {
     $video_html = '';
@@ -172,6 +175,7 @@ function odwpcs_get_csfd_movie_video( \DOMDocument $dom ) {
 /**
  * @param \DOMDocument $dom
  * @return array
+ * @since 0.1.0
  */
 function odwpcs_get_csfd_movie_details( \DOMDocument $dom ) {
     $movie_elm = $dom->getElementById( 'pg-web-film' );
@@ -198,6 +202,7 @@ function odwpcs_get_csfd_movie_details( \DOMDocument $dom ) {
  * Render shortcode error message.
  * @param string $msg
  * @return string
+ * @since 0.1.0
  */
 function odwpcs_render_shortcode_error( $msg ) {
     return '<div class="odwpcs-shortcode odwpcs-shortcode-error">' . $msg . '</div>';
@@ -207,6 +212,7 @@ function odwpcs_render_shortcode_error( $msg ) {
  * Render shortcode with given movie details.
  * @param array $movie
  * @return string
+ * @since 0.1.0
  */
 function odwpcs_render_shorcode( $movie ) {
     $out = ''
@@ -242,9 +248,6 @@ function odwpcs_render_shorcode( $movie ) {
         .   '</div>'
         . '</div>';
 
-    // TODO Remove this
-    //$out .= '<!-- ' . print_r( $movie, true ) . ' -->';
-
     return $out;
 }
 
@@ -252,6 +255,7 @@ function odwpcs_render_shorcode( $movie ) {
  * Create new shortcode `[csfd url="https://www.csfd.cz/film/426009-deadpool-2/prehled/"]`.
  * @param array $atts
  * @return string
+ * @since 0.1.0
  */
 function odwpcs_add_shortcode( $atts ) {
     $a = shortcode_atts( array(
@@ -260,6 +264,12 @@ function odwpcs_add_shortcode( $atts ) {
 
     if ( filter_var( $a['url'], FILTER_VALIDATE_URL ) === false ) {
         return odwpcs_render_shortcode_error( __( 'Nebylo poskytnuto správné ČSFD.cz URL!', 'odwpcs' ) );
+    }
+
+    // Use cache if it's available
+    $cache = odwpcs_get_cache_item( $a['url'] );
+    if ( ! empty( $cache ) ) {
+        return $cache;
     }
 
     $html_gzip = file_get_contents( $a['url'] );
@@ -277,17 +287,74 @@ function odwpcs_add_shortcode( $atts ) {
         return odwpcs_render_shortcode_error( __( 'Při parsování dat z webu ČSFD.cz došlo k chybě!' ) );
     }
 
-    return odwpcs_render_shorcode( $movie_details );
+    $html = odwpcs_render_shorcode( $movie_details );
+    odwpcs_set_cache_item( $a['url'], $html );
+    return $html;
 }
 
 /**
  * Register our public CSS.
+ * @return void
+ * @since 0.1.0
  */
 function odwpcs_register_styles() {
     wp_register_style( 'odwp-csfd_shortcode', plugin_dir_url( __FILE__ ) . 'assets/css/public.css', array() );
     wp_enqueue_style( 'odwp-csfd_shortcode' );
 }
 
+/**
+ * @return void
+ * @since 0.2.0
+ */
+function odwpcs_init() {
+
+    // Create cache directory if required
+    if ( ! file_exists( ODWPCS_CACHE_DIR ) ) {
+        wp_mkdir_p( ODWPCS_CACHE_DIR );
+    }
+}
+
+/**
+ * @param string $key
+ * @return string
+ * @since 0.2.0
+ */
+function odwpcs_get_cache_item_path( $key ) {
+    return ODWPCS_CACHE_DIR . '/' . md5( $key ) . '.html';
+}
+
+/**
+ * @param string $key
+ * @return string
+ * @since 0.2.0
+ */
+function odwpcs_get_cache_item( $key ) {
+    $path = odwpcs_get_cache_item_path( $key );
+
+    // Check if cache item exists
+    if ( ! file_exists( $path ) ) {
+        return '';
+    }
+
+    // Check if is not older then certain time
+    if ( time() - filemtime( $path ) >= ODWPCS_CACHE_TIME ) {
+        return '';
+    }
+
+    return file_get_contents( $path );
+}
+
+/**
+ * @param string $key
+ * @param string $data
+ * @return boolean
+ * @since 0.2.0
+ */
+function odwpcs_set_cache_item( $key, $data ) {
+    return ( file_put_contents( odwpcs_get_cache_item_path( $key ), $data ) > 0 );
+}
+
 // Register all
 add_shortcode( 'csfd', 'odwpcs_add_shortcode' );
 add_action( 'wp_enqueue_scripts', 'odwpcs_register_styles' );
+add_action( 'init', 'odwpcs_init' );
