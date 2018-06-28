@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: ČSFD.cz shortcode
- * Description: Plugin, který umožňuje snadno vložit shortcode s URL na ČSFD.cz, který pak bude zobrazen jako snippet s informacemi o filmu na vašich stránkách.
- * Version: 0.2.0
+ * Description: Plugin, který umožňuje snadno vložit shortcode s URL na <a href="https://www.csfd.cz/">ČSFD.cz</a>, který pak bude zobrazen jako snippet s informacemi o filmu na vašich stránkách. Od verze 0.3.0 pak přidává i vlastní typ příspěvků, kdy je možno vytvořit nový příspěvek z URL odkazující na <a href="https://www.csfd.cz/">ČSFD.cz</a>.
+ * Version: 0.3.0
  * Author: Ondřej Doněk
  * Author URI: https://ondrejd.com/
  * License: GPLv3
@@ -44,6 +44,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 defined( 'ODWPCS_CACHE_DIR' ) || define( 'ODWPCS_CACHE_DIR', WP_CONTENT_DIR . '/uploads/odwpcs-cache' );
 defined( 'ODWPCS_CACHE_TIME' ) || define( 'ODWPCS_CACHE_TIME', 60 * 60 * 24 * 5 );
+defined( 'ODWPCS_CPT' ) || define( 'ODWPCS_CPT', 'csfd_item' );
+defined( 'ODWPCS_OPT_ENABLE_CPT' ) || define( 'ODWPCS_OPT_ENABLE_CPT', 'odwpcs_options_enable_cpt' );
 
 /**
  * @param \DOMElement $movie_elm
@@ -353,6 +355,85 @@ function odwpcs_get_cache_item( $key ) {
 function odwpcs_set_cache_item( $key, $data ) {
     return ( file_put_contents( odwpcs_get_cache_item_path( $key ), $data ) > 0 );
 }
+
+//.............................................
+// TODO:
+// 1. Přidat možnosti pluginu, kde jde povolit/zakázat CPT "csfd_item"
+add_action( 'admin_init', 'odwpcs_options_register' );
+
+/**
+ * @return void
+ * @since 0.3.0
+ * @uses register_setting()
+ * @uses add_settings_section()
+ * @uses add_settings_field()
+ */
+function odwpcs_options_register() {
+    $csfd_icon = plugins_url( 'assets/images/csfd-icon-114x114.png', __FILE__ );
+
+    register_setting( 'writing', ODWPCS_OPT_ENABLE_CPT );
+
+    // TODO Move image & inline styles into `assets/css/admin.css`!
+    add_settings_section(
+        'odwpcs_settings_section',
+        sprintf(
+            __( '%1$sČSFD.cz%2$s shortcode', 'odwpcs' ),
+            '<img src="' . $csfd_icon . '" style="width:22px; position:relative; top:5px;" /> ' .
+            '<a href="https://www.csfd.cz/" target="_blank">', '</a>'
+        ),
+        'odwpcs_settings_section_cb',
+        'writing'
+    );
+
+    add_settings_field(
+        'odwpcs_settings_field',
+        __( 'Nový typ příspěvků', 'odwpcs' ),
+        'odwpcs_settings_field_cb',
+        'writing',
+        'odwpcs_settings_section'
+    );
+}
+
+/**
+ * @return void
+ * @since 0.3.0
+ * @uses register_setting()
+ */
+function odwpcs_settings_section_cb() {
+?>
+    <p><?php printf(
+        __( 'Zde můžete povolit či zakázat speciální typ příspěvků, které můžete vytvořit vložením %3$sURL%4$s na detail filmu či jiných položek na %1$sČSFD.cz%2$s. Pokud jej zakážete, stále budete mít k dispozici <em>shortcode</em>, který budete moci vložit do vašich příspěvků či stránek.', 'odwpcs' ),
+        '<a href="https://www.csfd.cz/" target="_blank">',
+        '</a>', '<em>', '</em>'
+    ); ?></p>
+<?php
+}
+
+/**
+ * @return void
+ * @since 0.3.0
+ * @uses get_option()
+ * @uses checked()
+ */
+function odwpcs_settings_field_cb() {
+    $enable_cpt = get_option( ODWPCS_OPT_ENABLE_CPT );
+
+?>
+    <p>
+        <label for="<?php echo ODWPCS_OPT_ENABLE_CPT; ?>">
+            <input id="<?php echo ODWPCS_OPT_ENABLE_CPT; ?>" name="<?php echo ODWPCS_OPT_ENABLE_CPT; ?>" type="checkbox" value="1" <?php checked( $enable_cpt, 1 ); ?> />
+            <?php printf( __( 'Povolit typ příspěvků %1$scsfd_item%2$s?', 'odwpcs' ), '<code>', '</code>' ); ?>
+        </label>
+    </p>
+<?php
+}
+
+// 2. Přidat CPT "csfd_item"
+// 3. Vyzkoušet to a otestovat
+// 4. Aktualizovat všechny README a Git
+// 5. Napsat na ondrejd.com
+
+//.............................................
 
 // Register all
 add_shortcode( 'csfd', 'odwpcs_add_shortcode' );
