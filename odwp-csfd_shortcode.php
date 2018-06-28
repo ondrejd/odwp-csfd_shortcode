@@ -358,6 +358,16 @@ function odwpcs_set_cache_item( $key, $data ) {
 
 //.............................................
 // TODO:
+
+/**
+ * @return string
+ * @since 0.3.0
+ * @uses plugins_url()
+ */
+function odwpcs_get_csfd_icon() {
+    return plugins_url( 'assets/images/csfd-icon-20x20.png', __FILE__ );
+}
+
 // 1. Přidat možnosti pluginu, kde jde povolit/zakázat CPT "csfd_item"
 add_action( 'admin_init', 'odwpcs_options_register' );
 
@@ -369,17 +379,15 @@ add_action( 'admin_init', 'odwpcs_options_register' );
  * @uses add_settings_field()
  */
 function odwpcs_options_register() {
-    $csfd_icon = plugins_url( 'assets/images/csfd-icon-114x114.png', __FILE__ );
-
     register_setting( 'writing', ODWPCS_OPT_ENABLE_CPT );
 
     // TODO Move image & inline styles into `assets/css/admin.css`!
     add_settings_section(
         'odwpcs_settings_section',
         sprintf(
-            __( '%1$sČSFD.cz%2$s shortcode', 'odwpcs' ),
-            '<img src="' . $csfd_icon . '" style="width:22px; position:relative; top:5px;" /> ' .
-            '<a href="https://www.csfd.cz/" target="_blank">', '</a>'
+            __( 'Plugin %1$sČSFD.cz%2$s shortcode%3$s', 'odwpcs' ),
+            '<em><img src="' . odwpcs_get_csfd_icon() . '" style="position:relative; top:5px;" /> ' .
+            '<a href="https://www.csfd.cz/" target="_blank">', '</a>', '</em>'
         ),
         'odwpcs_settings_section_cb',
         'writing'
@@ -421,7 +429,7 @@ function odwpcs_settings_field_cb() {
 ?>
     <p>
         <label for="<?php echo ODWPCS_OPT_ENABLE_CPT; ?>">
-            <input id="<?php echo ODWPCS_OPT_ENABLE_CPT; ?>" name="<?php echo ODWPCS_OPT_ENABLE_CPT; ?>" type="checkbox" value="1" <?php checked( $enable_cpt, 1 ); ?> />
+            <input id="<?php echo ODWPCS_OPT_ENABLE_CPT; ?>" name="<?php echo ODWPCS_OPT_ENABLE_CPT; ?>" type="checkbox" value="1" <?php checked( $enable_cpt, '1' ); ?> />
             <?php printf( __( 'Povolit typ příspěvků %1$scsfd_item%2$s?', 'odwpcs' ), '<code>', '</code>' ); ?>
         </label>
     </p>
@@ -429,6 +437,20 @@ function odwpcs_settings_field_cb() {
 }
 
 // 2. Přidat CPT "csfd_item"
+function odwpcs_create_cpt() {
+    register_post_type( ODWPCS_CPT, array(
+        'labels' => array(
+            'name' => __( 'Záznamy ČSFD.cz' ),
+            'singular_name' => __( 'Záznam ČSFD.cz' )
+        ),
+        'public' => true,
+        'has_archive' => true,
+        'position' => 21,
+        'menu_icon' => odwpcs_get_csfd_icon(),
+        'supports' => array( 'title', 'excerpt', 'thumbnail', 'custom-fields' )
+    ) );
+}
+
 // 3. Vyzkoušet to a otestovat
 // 4. Aktualizovat všechny README a Git
 // 5. Napsat na ondrejd.com
@@ -439,3 +461,4 @@ function odwpcs_settings_field_cb() {
 add_shortcode( 'csfd', 'odwpcs_add_shortcode' );
 add_action( 'wp_enqueue_scripts', 'odwpcs_register_styles' );
 add_action( 'init', 'odwpcs_init' );
+add_action( 'init', 'odwpcs_create_cpt' );
