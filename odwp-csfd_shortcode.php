@@ -369,7 +369,6 @@ function odwpcs_get_csfd_icon() {
 }
 
 // 1. Přidat možnosti pluginu, kde jde povolit/zakázat CPT "csfd_item"
-add_action( 'admin_init', 'odwpcs_options_register' );
 
 /**
  * @return void
@@ -437,7 +436,13 @@ function odwpcs_settings_field_cb() {
 }
 
 // 2. Přidat CPT "csfd_item"
-function odwpcs_create_cpt() {
+
+/**
+ * @return void
+ * @since 0.3.0
+ * @uses odwpcs_init_cpt()
+ */
+function odwpcs_init_cpt() {
     register_post_type( ODWPCS_CPT, array(
         'labels' => array(
             'name' => __( 'Záznamy ČSFD.cz' ),
@@ -451,6 +456,34 @@ function odwpcs_create_cpt() {
     ) );
 }
 
+/**
+ * @return void
+ * @since 0.3.0
+ * @uses flush_rewrite_rules()
+ */
+function odwpcs_rewrite_flush() {
+    odwpcs_init_cpt();
+    flush_rewrite_rules();
+}
+
+/**
+ * @param string $contextual_help
+ * @param string $screen_id
+ * @param \WP_Screen $screen
+ * @return string
+ * @since 0.3.0
+ */
+function odwpcs_add_help_text( $contextual_help, $screen_id, $screen ) {
+    if ( 'csfd_item' == $screen->id ) {
+        $contextual_help =
+            '<p>' . __( 'Ma této stránce můžete vytvořit nový ČSFD.cz záznam.', 'odwpcs' ) . '</p>';
+    } elseif ( 'edit-csfd_item' == $screen->id ) {
+        $contextual_help =
+            '<p>' . __( 'Tabulka na této stránce zobrazuje již vytvořené ČSFD.cz záznamy.', 'odwpcs' ) . '</p>' ;
+    }
+    return $contextual_help;
+}
+
 // 3. Vyzkoušet to a otestovat
 // 4. Aktualizovat všechny README a Git
 // 5. Napsat na ondrejd.com
@@ -458,7 +491,10 @@ function odwpcs_create_cpt() {
 //.............................................
 
 // Register all
-add_shortcode( 'csfd', 'odwpcs_add_shortcode' );
 add_action( 'wp_enqueue_scripts', 'odwpcs_register_styles' );
 add_action( 'init', 'odwpcs_init' );
-add_action( 'init', 'odwpcs_create_cpt' );
+add_action( 'init', 'odwpcs_init_cpt' );
+add_action( 'admin_init', 'odwpcs_options_register' );
+add_action( 'contextual_help', 'odwpcs_add_help_text', 10, 3 );
+add_shortcode( 'csfd', 'odwpcs_add_shortcode' );
+register_activation_hook( __FILE__, 'odwpcs_rewrite_flush' );
