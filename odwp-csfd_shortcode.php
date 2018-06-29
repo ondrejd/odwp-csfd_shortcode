@@ -46,6 +46,7 @@ defined( 'ODWPCS_CACHE_DIR' ) || define( 'ODWPCS_CACHE_DIR', WP_CONTENT_DIR . '/
 defined( 'ODWPCS_CACHE_TIME' ) || define( 'ODWPCS_CACHE_TIME', 60 * 60 * 24 * 5 );
 defined( 'ODWPCS_CPT' ) || define( 'ODWPCS_CPT', 'csfd_item' );
 defined( 'ODWPCS_OPT_ENABLE_CPT' ) || define( 'ODWPCS_OPT_ENABLE_CPT', 'odwpcs_options_enable_cpt' );
+defined( 'ODWPCS_NONCE' ) || define( 'ODWPCS_NONCE', 'odwpcs-nonce' );
 
 /**
  * @param \DOMElement $movie_elm
@@ -216,7 +217,7 @@ function odwpcs_render_shortcode_error( $msg ) {
  * @return string
  * @since 0.1.0
  */
-function odwpcs_render_shorcode( $movie ) {
+function odwpcs_render_shortcode( $movie ) {
     $out = ''
         . '<div class="odwpcs-shortcode">'
         .   '<div class="odwpcs-shortcode-header">'
@@ -264,17 +265,17 @@ function odwpcs_add_shortcode( $atts ) {
         'url' => '',
     ), $atts );
 
-    if ( filter_var( $a['url'], FILTER_VALIDATE_URL ) === false ) {
+    if ( filter_var( $csfd_url, FILTER_VALIDATE_URL ) === false ) {
         return odwpcs_render_shortcode_error( __( 'Nebylo poskytnuto správné ČSFD.cz URL!', 'odwpcs' ) );
     }
 
     // Use cache if it's available
-    $cache = odwpcs_get_cache_item( $a['url'] );
+    $cache = odwpcs_get_cache_item( $csfd_url );
     if ( ! empty( $cache ) ) {
         return $cache;
     }
 
-    $html_gzip = file_get_contents( $a['url'] );
+    $html_gzip = file_get_contents( $csfd_url );
     $html_raw = gzdecode( $html_gzip );
 
     try {
@@ -282,15 +283,15 @@ function odwpcs_add_shortcode( $atts ) {
         $html_dom->loadHTML( $html_raw );
         
         $movie_details = odwpcs_get_csfd_movie_details( $html_dom );
-        $movie_details['url'] = $a['url'];
+        $movie_details['url'] = $csfd_url;
     } catch ( \Exception $e ) {}
 
     if ( empty( $movie_details['title'] ) ) {
-        return odwpcs_render_shortcode_error( __( 'Při parsování dat z webu ČSFD.cz došlo k chybě!' ) );
+        return odwpcs_render_shortcode_error( __( 'Při parsování dat z webu ČSFD.cz došlo k chybě!', 'odwpcs' ) );
     }
 
-    $html = odwpcs_render_shorcode( $movie_details );
-    odwpcs_set_cache_item( $a['url'], $html );
+    $html = odwpcs_render_shortcode( $movie_details );
+    odwpcs_set_cache_item( $csfd_url, $html );
     return $html;
 }
 
@@ -452,7 +453,7 @@ function odwpcs_init_cpt() {
         'has_archive' => true,
         'position' => 21,
         'menu_icon' => odwpcs_get_csfd_icon(),
-        'supports' => array( 'title', 'excerpt', 'thumbnail', 'custom-fields' )
+        'supports' => array( 'title' ),
     ) );
 }
 
@@ -469,7 +470,7 @@ function odwpcs_rewrite_flush() {
 /**
  * @param string $contextual_help
  * @param string $screen_id
- * @param \WP_Screen $screen
+ * @param WP_Screen $screen
  * @return string
  * @since 0.3.0
  */
@@ -484,9 +485,180 @@ function odwpcs_add_help_text( $contextual_help, $screen_id, $screen ) {
     return $contextual_help;
 }
 
-// 3. Vyzkoušet to a otestovat
-// 4. Aktualizovat všechny README a Git
-// 5. Napsat na ondrejd.com
+// 3. Přidat metabox pro CSFD URL
+
+/**
+ * @return void
+ * @since 0.3.0
+ * @uses add_meta_box()
+ */
+function odwpcs_add_csfd_url_metabox() {
+    add_meta_box(
+        'odwpcs-csfd_url',
+        __( 'ČSFD.cz URL', 'odwpcs' ),
+        'odwpcs_render_csfd_url_metabox',
+        ODWPCS_CPT,
+        'normal',
+        'high'
+    );
+}
+
+/**
+ * @param WP_Post $post
+ * @return void
+ * @since 0.3.0
+ * @uses wp_nonce_field()
+ */
+function odwpcs_render_csfd_url_metabox( $post ) {
+    wp_nonce_field( basename( __FILE__ ), ODWPCS_NONCE );
+    $csfd_url = get_post_meta( $post->ID, 'csfd_item_url', true);
+?>
+<table class="form-table">
+    <tr>
+        <th scope="row">
+            <label for="odwpcs-csfd_url"><?php _e( 'Odkaz na ČSFD.cz', 'odwpcs' ); ?></label>
+        </th>
+        <td>
+            <input class="regular-text" id="odwpcs-csfd_url" name="odwpcs-csfd_url" style="width:100%;" tabindex="1" type="url" value="<?php echo $csfd_url; ?>">
+            <p class="description"><?php printf(
+                __( 'Zadejte URL na zdrojovou stránku na serveru %1$sČSFD.cz%2$s a klikněte na tlačítko %3$sPublikovat%4$s nebo %3$sUložit koncept%4$s.', 'odwpcs' ),
+                '<a href="https://www.csfd.cz/" target="_blank">', '</a>', '<strong>', '</strong>'
+            ); ?></p>
+        </td>
+    </tr>
+</table>
+<?php
+
+    if ( ! empty( $csfd_url ) ) {
+        $html_gzip = file_get_contents( $csfd_url );
+        $html_raw = gzdecode( $html_gzip );
+
+        try {
+            $html_dom = new DOMDocument();
+            $html_dom->loadHTML( $html_raw );
+            $movie_details = odwpcs_get_csfd_movie_details( $html_dom );
+            $movie_details['url'] = $csfd_url;
+        } catch ( \Exception $e ) {}
+
+        if ( empty( $movie_details['title'] ) ) {
+            echo '<p style="color:#f30; font-weight:bold;">' . __( 'Při parsování dat z webu ČSFD.cz došlo k chybě!', 'odwpcs' ) . '</p>';
+        }
+
+        echo odwpcs_render_shortcode( $movie_details );
+    }
+}
+
+// 5. Uložit ČSFD.cz URL jako meta hodnotu
+
+/**
+ * @global wpdb $wpdb
+ * @param integer $post_id
+ * @return string|void
+ * @since 0.3.0
+ * @uses add_action()
+ * @uses current_user_can()
+ * @uses is_wp_error()
+ * @uses sanitize_title()
+ * @uses update_post_meta()
+ * @uses wp_is_post_autosave()
+ * @uses wp_is_post_revision()
+ * @uses wp_verify_nonce()
+ * @uses wp_update_post()
+ */
+function odwpcs_save_csfd_url_metabox( $post_id ) {
+
+    // verify nonce
+    if ( ! isset( $_POST[ODWPCS_NONCE] ) || ! wp_verify_nonce( $_POST[ODWPCS_NONCE], basename( __FILE__ ) ) ) {
+        return 'nonce not verified';
+    }
+
+    // check autosave
+    if ( wp_is_post_autosave( $post_id ) ) {
+        return 'autosave';
+    }
+
+    //check post revision
+    if ( wp_is_post_revision( $post_id ) ) {
+        return 'revision';
+    }
+
+    // check permissions
+    if ( 'project' == $_POST['post_type'] ) {
+        if ( ! current_user_can( 'edit_page', $post_id ) ) {
+            return 'cannot edit page';
+        }
+    } elseif ( ! current_user_can( 'edit_post', $post_id ) ) {
+        return 'cannot edit post';
+    }
+
+    $csfd_url = $_POST['odwpcs-csfd_url'];
+    if ( filter_var( $csfd_url, FILTER_VALIDATE_URL ) === false ) {
+        if ( filter_var( $csfd_url, FILTER_VALIDATE_URL ) === false ) {
+            $out = sprintf( '<div class="notice notice-error is-dismissible"><p>%2$s</p></div>', __( 'Nebylo poskytnuto správné ČSFD.cz URL!', 'odwpcs' ) );
+            add_action( 'admin_notices', function() use ( $out ) { printf( $out ); } );
+        }
+        return 'url is not valid';
+    }
+
+    $html_gzip = file_get_contents( $csfd_url );
+    $html_raw = gzdecode( $html_gzip );
+
+    try {
+        $html_dom = new DOMDocument();
+        $html_dom->loadHTML( $html_raw );
+        
+        $movie_details = odwpcs_get_csfd_movie_details( $html_dom );
+        $movie_details['url'] = $csfd_url;
+    } catch ( \Exception $e ) {}
+
+    if ( ! isset( $movie_details['title'] ) || empty( $movie_details['title'] ) || ! isset( $movie_details['url'] ) ) {
+        $out = sprintf( '<div class="notice notice-error is-dismissible"><p>%2$s</p></div>', __( 'Při parsování dat z webu ČSFD.cz došlo k chybě!', 'odwpcs' ) );
+        add_action( 'admin_notices', function() use ( $out ) { printf( $out ); } );
+        return 'parsing error';
+    }
+
+    update_post_meta( $post_id, 'csfd_item_url', $csfd_url );
+    update_post_meta( $post_id, 'csfd_item_category', $movie_details['category'] );
+    update_post_meta( $post_id, 'csfd_item_description', $movie_details['description'] );
+    update_post_meta( $post_id, 'csfd_item_image', $movie_details['image'] );
+    update_post_meta( $post_id, 'csfd_item_title', $movie_details['title'] );
+    update_post_meta( $post_id, 'csfd_item_video', $movie_details['video'] );
+  
+    $_post_id = wp_update_post( array(
+        'ID'           => $post_id,
+        'post_title'   => $movie_details['title'],
+        'post_name'    => sanitize_title( $movie_details['title'] ),
+        'post_content' => $movie_details['description']
+    ) );
+
+    if ( is_wp_error( $_post_id ) ) {
+        $errors = $_post_id->get_error_messages();
+
+        foreach ( $errors as $error ) {
+            $out = sprintf( '<div class="notice notice-error is-dismissible"><p>%2$s</p></div>', $error );
+            add_action( 'admin_notices', function() use ( $out ) { printf( $out ); } );
+        }
+    }
+
+    return $post_id;
+}
+
+// 5. Připojíme `admin.css`
+
+/**
+ * Enqueue admin scripts and styles.
+ * @param string $hook
+ * @return void
+ * @since 0.3.0
+ * @uses plugins_url()
+ * @uses wp_enqueue_style()
+ */
+function odwpcs_admin_scripts( $hook ) {
+    wp_enqueue_style( 'odwpec_admin_styles', plugins_url( 'assets/css/admin.css', __FILE__ ) );
+}
+
+// 6. Aktualizovat všechny README a Git
+// 7. Napsat na ondrejd.com
 
 //.............................................
 
@@ -496,5 +668,9 @@ add_action( 'init', 'odwpcs_init' );
 add_action( 'init', 'odwpcs_init_cpt' );
 add_action( 'admin_init', 'odwpcs_options_register' );
 add_action( 'contextual_help', 'odwpcs_add_help_text', 10, 3 );
+add_action( 'add_meta_boxes', 'odwpcs_add_csfd_url_metabox' );
+add_action( 'save_post', 'odwpcs_save_csfd_url_metabox' );
+add_action( 'new_to_publish', 'odwpcs_save_csfd_url_metabox' );
+add_action( 'admin_enqueue_scripts', 'odwpcs_admin_scripts', 99 );
 add_shortcode( 'csfd', 'odwpcs_add_shortcode' );
 register_activation_hook( __FILE__, 'odwpcs_rewrite_flush' );
