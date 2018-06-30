@@ -44,3 +44,6 @@
 .odwpcs-shortcode-footer p {
     text-align: right;
 }
+
+/* wp_list_table for "csfd_item"s */
+.wp-list-table .column-cache_status { width: 100%; }

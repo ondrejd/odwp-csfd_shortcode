@@ -255,6 +255,37 @@ function odwpcs_render_shortcode( $movie ) {
 }
 
 /**
+ * Load HTML from given ČSFD.cz URL and returns array with movie details.
+ * @param string $url
+ * @return array
+ * @since 0.3.0
+ */
+function odwpcs_load_csfd_url( $url ) {
+    $html_gzip = file_get_contents( $url );
+    $html_raw = gzdecode( $html_gzip );
+    libxml_use_internal_errors( true );
+
+    try {
+        $html_dom = new DOMDocument();
+
+        if ( ! $html_dom->loadHTML( $html_raw ) ) {
+            foreach ( libxml_get_errors() as $err ) {
+                //...
+            }
+        }
+
+        $movie_details = odwpcs_get_csfd_movie_details( $html_dom );
+        $movie_details['url'] = $url;
+    } catch ( \Exception $e ) {
+        //...
+    }
+
+    libxml_clear_errors();
+
+    return $movie_details;
+}
+
+/**
  * Create new shortcode `[csfd url="https://www.csfd.cz/film/426009-deadpool-2/prehled/"]`.
  * @param array $atts
  * @return string
@@ -265,33 +296,25 @@ function odwpcs_add_shortcode( $atts ) {
         'url' => '',
     ), $atts );
 
-    if ( filter_var( $csfd_url, FILTER_VALIDATE_URL ) === false ) {
+    if ( filter_var( $a['url'], FILTER_VALIDATE_URL ) === false ) {
         return odwpcs_render_shortcode_error( __( 'Nebylo poskytnuto správné ČSFD.cz URL!', 'odwpcs' ) );
     }
 
-    // Use cache if it's available
-    $cache = odwpcs_get_cache_item( $csfd_url );
+    $cache = odwpcs_get_cache_item( $a['url'] );
+
     if ( ! empty( $cache ) ) {
         return $cache;
     }
 
-    $html_gzip = file_get_contents( $csfd_url );
-    $html_raw = gzdecode( $html_gzip );
+    $movie_details = odwpcs_load_csfd_url( $a['url'] );
 
-    try {
-        $html_dom = new DOMDocument();
-        $html_dom->loadHTML( $html_raw );
-        
-        $movie_details = odwpcs_get_csfd_movie_details( $html_dom );
-        $movie_details['url'] = $csfd_url;
-    } catch ( \Exception $e ) {}
-
-    if ( empty( $movie_details['title'] ) ) {
+    if ( ! array_key_exists( 'title', $movie_details ) || ! array_key_exists( 'url', $movie_details ) ) {
         return odwpcs_render_shortcode_error( __( 'Při parsování dat z webu ČSFD.cz došlo k chybě!', 'odwpcs' ) );
     }
 
     $html = odwpcs_render_shortcode( $movie_details );
-    odwpcs_set_cache_item( $csfd_url, $html );
+    odwpcs_set_cache_item( $a['url'], $html );
+
     return $html;
 }
 
@@ -357,10 +380,8 @@ function odwpcs_set_cache_item( $key, $data ) {
     return ( file_put_contents( odwpcs_get_cache_item_path( $key ), $data ) > 0 );
 }
 
-//.............................................
-// TODO:
-
 /**
+ * Return plugin's icon.
  * @return string
  * @since 0.3.0
  * @uses plugins_url()
@@ -369,9 +390,8 @@ function odwpcs_get_csfd_icon() {
     return plugins_url( 'assets/images/csfd-icon-20x20.png', __FILE__ );
 }
 
-// 1. Přidat možnosti pluginu, kde jde povolit/zakázat CPT "csfd_item"
-
 /**
+ * Register options of the plugin.
  * @return void
  * @since 0.3.0
  * @uses register_setting()
@@ -405,7 +425,6 @@ function odwpcs_options_register() {
 /**
  * @return void
  * @since 0.3.0
- * @uses register_setting()
  */
 function odwpcs_settings_section_cb() {
 ?>
@@ -425,20 +444,16 @@ function odwpcs_settings_section_cb() {
  */
 function odwpcs_settings_field_cb() {
     $enable_cpt = get_option( ODWPCS_OPT_ENABLE_CPT );
-
 ?>
-    <p>
-        <label for="<?php echo ODWPCS_OPT_ENABLE_CPT; ?>">
-            <input id="<?php echo ODWPCS_OPT_ENABLE_CPT; ?>" name="<?php echo ODWPCS_OPT_ENABLE_CPT; ?>" type="checkbox" value="1" <?php checked( $enable_cpt, '1' ); ?> />
-            <?php printf( __( 'Povolit typ příspěvků %1$scsfd_item%2$s?', 'odwpcs' ), '<code>', '</code>' ); ?>
-        </label>
-    </p>
+    <label for="<?php echo ODWPCS_OPT_ENABLE_CPT; ?>">
+        <input id="<?php echo ODWPCS_OPT_ENABLE_CPT; ?>" name="<?php echo ODWPCS_OPT_ENABLE_CPT; ?>" type="checkbox" value="1" <?php checked( $enable_cpt, '1' ); ?> />
+        <?php printf( __( 'Povolit typ příspěvků %1$scsfd_item%2$s?', 'odwpcs' ), '<code>', '</code>' ); ?>
+    </label>
 <?php
 }
 
-// 2. Přidat CPT "csfd_item"
-
 /**
+ * Initialize CPT "csfd_item".
  * @return void
  * @since 0.3.0
  * @uses odwpcs_init_cpt()
@@ -485,9 +500,8 @@ function odwpcs_add_help_text( $contextual_help, $screen_id, $screen ) {
     return $contextual_help;
 }
 
-// 3. Přidat metabox pro CSFD URL
-
 /**
+ * Add meta box with CSFD.cz URL for CPT "csfd_item".
  * @return void
  * @since 0.3.0
  * @uses add_meta_box()
@@ -504,53 +518,47 @@ function odwpcs_add_csfd_url_metabox() {
 }
 
 /**
+ * Render our CSFD.cz URL meta box.
  * @param WP_Post $post
  * @return void
  * @since 0.3.0
  * @uses wp_nonce_field()
  */
 function odwpcs_render_csfd_url_metabox( $post ) {
+    $csfd_url = get_post_meta( $post->ID, 'csfd_item_url', true );
+
     wp_nonce_field( basename( __FILE__ ), ODWPCS_NONCE );
-    $csfd_url = get_post_meta( $post->ID, 'csfd_item_url', true);
 ?>
-<table class="form-table">
-    <tr>
-        <th scope="row">
-            <label for="odwpcs-csfd_url"><?php _e( 'Odkaz na ČSFD.cz', 'odwpcs' ); ?></label>
-        </th>
-        <td>
-            <input class="regular-text" id="odwpcs-csfd_url" name="odwpcs-csfd_url" style="width:100%;" tabindex="1" type="url" value="<?php echo $csfd_url; ?>">
-            <p class="description"><?php printf(
-                __( 'Zadejte URL na zdrojovou stránku na serveru %1$sČSFD.cz%2$s a klikněte na tlačítko %3$sPublikovat%4$s nebo %3$sUložit koncept%4$s.', 'odwpcs' ),
-                '<a href="https://www.csfd.cz/" target="_blank">', '</a>', '<strong>', '</strong>'
-            ); ?></p>
-        </td>
-    </tr>
-</table>
+    <table class="form-table">
+        <tr>
+            <th scope="row">
+                <label for="odwpcs-csfd_url"><?php _e( 'Odkaz na ČSFD.cz', 'odwpcs' ); ?></label>
+            </th>
+            <td>
+                <input class="regular-text" id="odwpcs-csfd_url" name="odwpcs-csfd_url" style="width:100%;" tabindex="1" type="url" value="<?php echo $csfd_url; ?>">
+                <p class="description"><?php printf(
+                    __( 'Zadejte URL na zdrojovou stránku na serveru %1$sČSFD.cz%2$s a klikněte na tlačítko %3$sPublikovat%4$s nebo %3$sUložit koncept%4$s.', 'odwpcs' ),
+                    '<a href="https://www.csfd.cz/" target="_blank">', '</a>', '<strong>', '</strong>'
+                ); ?></p>
+            </td>
+        </tr>
+    </table>
+    <pre><?php var_dump( $csfd_url ); ?></pre>
 <?php
 
     if ( ! empty( $csfd_url ) ) {
-        $html_gzip = file_get_contents( $csfd_url );
-        $html_raw = gzdecode( $html_gzip );
+        $movie_details = odwpcs_load_csfd_url( $csfd_url );
 
-        try {
-            $html_dom = new DOMDocument();
-            $html_dom->loadHTML( $html_raw );
-            $movie_details = odwpcs_get_csfd_movie_details( $html_dom );
-            $movie_details['url'] = $csfd_url;
-        } catch ( \Exception $e ) {}
-
-        if ( empty( $movie_details['title'] ) ) {
+        if ( ! array_key_exists( 'title', $movie_details ) || ! array_key_exists( 'url', $movie_details ) ) {
             echo '<p style="color:#f30; font-weight:bold;">' . __( 'Při parsování dat z webu ČSFD.cz došlo k chybě!', 'odwpcs' ) . '</p>';
+        } else {
+            echo odwpcs_render_shortcode( $movie_details );
         }
-
-        echo odwpcs_render_shortcode( $movie_details );
     }
 }
 
-// 5. Uložit ČSFD.cz URL jako meta hodnotu
-
 /**
+ * Save value inserted using CSFD.cz URL meta box.
  * @global wpdb $wpdb
  * @param integer $post_id
  * @return string|void
@@ -577,73 +585,61 @@ function odwpcs_save_csfd_url_metabox( $post_id ) {
         return 'autosave';
     }
 
-    //check post revision
+    // check post revision
     if ( wp_is_post_revision( $post_id ) ) {
         return 'revision';
     }
 
     // check permissions
-    if ( 'project' == $_POST['post_type'] ) {
+    if ( 'csfd_item' == $_POST['post_type'] ) {
         if ( ! current_user_can( 'edit_page', $post_id ) ) {
             return 'cannot edit page';
         }
-    } elseif ( ! current_user_can( 'edit_post', $post_id ) ) {
-        return 'cannot edit post';
     }
 
+    // CSFD.cz URL (an item's detail page)
     $csfd_url = $_POST['odwpcs-csfd_url'];
     if ( filter_var( $csfd_url, FILTER_VALIDATE_URL ) === false ) {
-        if ( filter_var( $csfd_url, FILTER_VALIDATE_URL ) === false ) {
-            $out = sprintf( '<div class="notice notice-error is-dismissible"><p>%2$s</p></div>', __( 'Nebylo poskytnuto správné ČSFD.cz URL!', 'odwpcs' ) );
-            add_action( 'admin_notices', function() use ( $out ) { printf( $out ); } );
-        }
+        $out = sprintf( '<div class="notice notice-error is-dismissible"><p>%1$s</p></div>', __( 'Nebylo poskytnuto správné ČSFD.cz URL!', 'odwpcs' ) );
+        add_action( 'admin_notices', function() use ( $out ) { printf( $out ); } );
         return 'url is not valid';
     }
 
-    $html_gzip = file_get_contents( $csfd_url );
-    $html_raw = gzdecode( $html_gzip );
-
-    try {
-        $html_dom = new DOMDocument();
-        $html_dom->loadHTML( $html_raw );
-        
-        $movie_details = odwpcs_get_csfd_movie_details( $html_dom );
-        $movie_details['url'] = $csfd_url;
-    } catch ( \Exception $e ) {}
-
-    if ( ! isset( $movie_details['title'] ) || empty( $movie_details['title'] ) || ! isset( $movie_details['url'] ) ) {
-        $out = sprintf( '<div class="notice notice-error is-dismissible"><p>%2$s</p></div>', __( 'Při parsování dat z webu ČSFD.cz došlo k chybě!', 'odwpcs' ) );
+    // load movie details
+    $movie_details = odwpcs_load_csfd_url( $csfd_url );
+    if ( ! array_key_exists( 'title', $movie_details ) || ! array_key_exists( 'url', $movie_details ) ) {
+        $out = sprintf( '<div class="notice notice-error is-dismissible"><p>%1$s</p></div>', __( 'Při parsování dat z webu ČSFD.cz došlo k chybě!', 'odwpcs' ) );
         add_action( 'admin_notices', function() use ( $out ) { printf( $out ); } );
         return 'parsing error';
     }
 
+    // update post meta
     update_post_meta( $post_id, 'csfd_item_url', $csfd_url );
     update_post_meta( $post_id, 'csfd_item_category', $movie_details['category'] );
     update_post_meta( $post_id, 'csfd_item_description', $movie_details['description'] );
     update_post_meta( $post_id, 'csfd_item_image', $movie_details['image'] );
     update_post_meta( $post_id, 'csfd_item_title', $movie_details['title'] );
     update_post_meta( $post_id, 'csfd_item_video', $movie_details['video'] );
-  
+
+    // update post self
     $_post_id = wp_update_post( array(
         'ID'           => $post_id,
         'post_title'   => $movie_details['title'],
         'post_name'    => sanitize_title( $movie_details['title'] ),
-        'post_content' => $movie_details['description']
+        'post_content' => odwpcs_render_shortcode( $movie_details['title'] )
     ) );
 
+    // print errors
     if ( is_wp_error( $_post_id ) ) {
         $errors = $_post_id->get_error_messages();
-
-        foreach ( $errors as $error ) {
-            $out = sprintf( '<div class="notice notice-error is-dismissible"><p>%2$s</p></div>', $error );
+        if ( count( $errors ) > 0 ) {
+            $out = sprintf( '<div class="notice notice-error is-dismissible"><p>%2$s</p></div>', __( 'Při aktualizaci příspěvku došlo k chybě!', 'odwpcs' ) );
             add_action( 'admin_notices', function() use ( $out ) { printf( $out ); } );
         }
     }
 
     return $post_id;
 }
-
-// 5. Připojíme `admin.css`
 
 /**
  * Enqueue admin scripts and styles.
@@ -657,10 +653,46 @@ function odwpcs_admin_scripts( $hook ) {
     wp_enqueue_style( 'odwpec_admin_styles', plugins_url( 'assets/css/admin.css', __FILE__ ) );
 }
 
-// 6. Aktualizovat všechny README a Git
-// 7. Napsat na ondrejd.com
+/**
+ * Add the custom columns to the "csfd_item" post type.
+ * @param array $columns
+ * @return array
+ * @since 0.3.0
+ */
+function odwpcs_custom_csfd_item_columns( $columns ) {
+    unset( $columns['gadwp_stats'] );
+    $columns['csfd_url'] = __( 'ČSFD.cz', 'odwpcs' );
+    $columns['cache_status'] = __( 'Cache', 'odwpcs' );
+    return $columns;
+}
 
-//.............................................
+/**
+ * Render content of our table columns.
+ * @param string $column
+ * @param integer $post_id
+ * @return void
+ */
+function odwpcs_custom_csfd_item_column( $column, $post_id ) {
+    switch ( $column ) {
+        case 'csfd_url':
+            $csfd_url = get_post_meta( $post_id, 'csfd_item_url', true );
+            if ( ! $csfd_url ) {
+                echo '<code>&ndash;&ndash;&ndash;</code>';
+            } else {
+                printf( '<a href="%1$s" target="_blank">%1$s</a>', $csfd_url );
+            }
+            break;
+
+        case 'cache_status':
+            $cache_status = 0;
+            $cache_status_msg = '<span style="color:%1$s;">%2$s</span>';
+            switch( $cache_status ) {
+                case 0: printf( $cache_status_msg, 'red', __( 'není uloženo', 'odwpcs' ) ); break;
+                case 1: printf( $cache_status_msg, 'green', __( 'uloženo', 'odwpcs' ) ); break;
+            }
+            break;
+    }
+}
 
 // Register all
 add_action( 'wp_enqueue_scripts', 'odwpcs_register_styles' );
@@ -672,5 +704,7 @@ add_action( 'add_meta_boxes', 'odwpcs_add_csfd_url_metabox' );
 add_action( 'save_post', 'odwpcs_save_csfd_url_metabox' );
 add_action( 'new_to_publish', 'odwpcs_save_csfd_url_metabox' );
 add_action( 'admin_enqueue_scripts', 'odwpcs_admin_scripts', 99 );
+//add_filter( 'manage_csfd_item_posts_columns', 'odwpcs_custom_csfd_item_columns' );
+//add_action( 'manage_csfd_item_posts_custom_column' , 'odwpcs_custom_csfd_item_column', 10, 2 );
 add_shortcode( 'csfd', 'odwpcs_add_shortcode' );
 register_activation_hook( __FILE__, 'odwpcs_rewrite_flush' );
